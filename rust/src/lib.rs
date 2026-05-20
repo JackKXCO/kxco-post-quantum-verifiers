@@ -84,7 +84,7 @@ pub fn verify_hmac(secret: &[u8], timestamp: &str, raw_body: &[u8], sig_header: 
 /// Returns `false` on any error (bad hex, invalid key, signature mismatch).
 pub fn verify_pq(public_key: &[u8], timestamp: &str, raw_body: &[u8], sig_header: &str) -> bool {
     use fips204::ml_dsa_65;
-    use fips204::traits::Verifier;
+    use fips204::traits::{SerDes, Verifier};
 
     let hex_sig = sig_header.strip_prefix("ml-dsa-65=").unwrap_or(sig_header);
     let sig_bytes = match hex::decode(hex_sig) {

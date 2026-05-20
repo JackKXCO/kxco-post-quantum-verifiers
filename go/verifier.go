@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudflare/circl/sign/dilithium/mode3"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 )
 
 // DefaultReplayWindow is the time window (seconds) within which a delivery
@@ -81,14 +81,13 @@ func VerifyPQ(publicKey []byte, timestamp string, rawBody []byte, sigHeader stri
 		return false, fmt.Errorf("ml-dsa-65 signature is not hex: %w", err)
 	}
 
-	scheme := mode3.NewScheme()
-	pk, err := scheme.UnmarshalBinaryPublicKey(publicKey)
-	if err != nil {
+	var pk mldsa65.PublicKey
+	if err := pk.UnmarshalBinary(publicKey); err != nil {
 		return false, fmt.Errorf("invalid ML-DSA-65 public key: %w", err)
 	}
 
 	env := Envelope(timestamp, rawBody)
-	return scheme.Verify(pk, env, sigBytes, nil), nil
+	return mldsa65.Verify(&pk, env, nil, sigBytes), nil
 }
 
 // Fingerprint returns the 16-hex kid of a public key: first 8 bytes of SHA-256.
