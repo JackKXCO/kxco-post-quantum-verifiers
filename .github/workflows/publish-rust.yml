@@ -1,9 +1,19 @@
 name: publish-rust
 
-# Triggered by pushing a tag of the form `rust/v*` (e.g. rust/v1.0.0)
-# or via manual workflow_dispatch.
+# Triggered by pushing a `rust/v*` tag, or manual workflow_dispatch.
 #
-# Publishes the rust/ subdirectory crate `kxco-verify` to crates.io.
+# Auth via crates.io Trusted Publishing — crates.io verifies the publish
+# through OIDC against this workflow run, exchanges the OIDC token for a
+# short-lived publish token, and cargo publishes with that.
+# No CRATES_IO_TOKEN secret is involved.
+#
+# To enable this, the project owner must add a trusted publisher at
+# https://crates.io/crates/kxco-verify/settings/publishing with:
+#   Owner:             JackKXCO
+#   Repository name:   kxco-post-quantum-verifiers
+#   Workflow filename: publish-rust.yml
+#   Environment name:  (leave blank)
+#
 # All third-party actions pinned by 40-char commit SHA.
 
 on:
@@ -20,6 +30,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write   # required for crates.io Trusted Publishing OIDC
 
 jobs:
   publish:
@@ -37,9 +48,13 @@ jobs:
       - name: Verify tests pass before publish
         run: cargo test --all-features
 
+      - name: Authenticate to crates.io via OIDC
+        id: auth
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+
       - name: Publish to crates.io
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             cargo publish --dry-run
