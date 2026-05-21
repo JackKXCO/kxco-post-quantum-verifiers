@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request, HTTPException
 import os
 import kxco_verify as kx
 
-PINNED_KID    = "4a7c9e2f1b3d5680"
+PINNED_KID    = "aa29f37ab7f4b2cf"  # current KXCO production kid (refresh from /.well-known if rotated)
 PINNED_PUBKEY = bytes.fromhex("...3904 hex chars...")
 HMAC_SECRET   = os.environ["KXCO_WEBHOOK_SECRET"].encode()
 

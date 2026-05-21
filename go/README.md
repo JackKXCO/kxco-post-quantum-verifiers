@@ -20,7 +20,8 @@ import (
 )
 
 // Pin these from /.well-known/kxco-pq-pubkey on first integration
-var PinnedKid    = "4a7c9e2f1b3d5680"
+// Current KXCO production kid. Fetch fresh from /.well-known if KXCO ever rotates.
+var PinnedKid    = "aa29f37ab7f4b2cf"
 var PinnedPubkey, _ = hex.DecodeString("...3904 hex chars...")
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
