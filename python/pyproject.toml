@@ -23,6 +23,10 @@ Homepage = "https://kxco.ai"
 Documentation = "https://chain.kxco.ai/wallet/dev-docs"
 Repository = "https://github.com/JackKXCO/kxco-post-quantum-verifiers"
 
+[tool.setuptools]
+# Single-module flat layout. Excludes test_kxco_verify.py from the wheel.
+py-modules = ["kxco_verify"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
