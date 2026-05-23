@@ -121,3 +121,89 @@ fn verify_hmac_accepts_prefixed_and_bare() {
     tampered.replace_range(0..1, "0");
     assert!(!verify_hmac(vec.secret_utf8.as_bytes(), &vec.timestamp, vec.body_utf8.as_bytes(), &tampered));
 }
+
+// ── v1.1.0 — pinned_kids multi-kid rotation tests ────────────────────────
+
+use kxco_verify::{verify_delivery, VerifyDeliveryArgs};
+use std::collections::HashMap;
+
+fn make_headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
+#[test]
+#[should_panic(expected = "mutually exclusive")]
+fn pinned_kids_rejects_mixed_with_singular() {
+    let zero = vec![0u8; 1952];
+    let headers = make_headers(&[]);
+    let kids: Vec<(&str, &[u8])> = vec![("aaaaaaaaaaaaaaaa", &zero)];
+    let _ = verify_delivery(VerifyDeliveryArgs {
+        headers:        &headers,
+        raw_body:       b"{}",
+        hmac_secret:    None,
+        pq_public_key:  Some(&zero),
+        pinned_kid:     Some("aaaaaaaaaaaaaaaa"),
+        pinned_kids:    Some(&kids),
+        window_seconds: 0,
+        now_unix:       0,
+    });
+}
+
+#[test]
+fn pinned_kids_kid_mismatch_sets_kid_not_ok() {
+    let zero = vec![0u8; 1952];
+    let pq_sig = format!("ml-dsa-65={}", "00".repeat(3309));
+    let now: i64 = 1_000_000_000;
+    let headers = make_headers(&[
+        ("x-kxco-timestamp",    "1000000000"),
+        ("x-kxco-pq-kid",       "cccccccccccccccc"),
+        ("x-kxco-pq-signature", pq_sig.as_str()),
+    ]);
+    let kids: Vec<(&str, &[u8])> = vec![
+        ("aaaaaaaaaaaaaaaa", &zero),
+        ("bbbbbbbbbbbbbbbb", &zero),
+    ];
+    let r = verify_delivery(VerifyDeliveryArgs {
+        headers:        &headers,
+        raw_body:       b"{}",
+        hmac_secret:    None,
+        pq_public_key:  None,
+        pinned_kid:     None,
+        pinned_kids:    Some(&kids),
+        window_seconds: 0,
+        now_unix:       now,
+    });
+    assert!(!r.kid_ok, "expected kid_ok=false for unmatched kid");
+    assert!(r.resolved_kid.is_none(), "expected resolved_kid=None, got {:?}", r.resolved_kid);
+    assert!(!r.pq_ok);
+    assert!(!r.ok());
+}
+
+#[test]
+fn pinned_kids_kid_match_resolves() {
+    let zero = vec![0u8; 1952];
+    let now: i64 = 1_000_000_000;
+    let headers = make_headers(&[
+        ("x-kxco-timestamp", "1000000000"),
+        ("x-kxco-pq-kid",    "aaaaaaaaaaaaaaaa"),
+        // no pq signature — testing kid resolution only
+    ]);
+    let kids: Vec<(&str, &[u8])> = vec![
+        ("aaaaaaaaaaaaaaaa", &zero),
+        ("bbbbbbbbbbbbbbbb", &zero),
+    ];
+    let r = verify_delivery(VerifyDeliveryArgs {
+        headers:        &headers,
+        raw_body:       b"{}",
+        hmac_secret:    None,
+        pq_public_key:  None,
+        pinned_kid:     None,
+        pinned_kids:    Some(&kids),
+        window_seconds: 0,
+        now_unix:       now,
+    });
+    assert!(r.kid_ok, "expected kid_ok=true for matched kid");
+    assert_eq!(r.resolved_kid.as_deref(), Some("aaaaaaaaaaaaaaaa"));
+    assert!(!r.pq_ok, "expected pq_ok=false (no signature provided)");
+    assert!(r.timestamp_ok);
+}

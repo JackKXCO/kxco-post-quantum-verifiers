@@ -6,6 +6,22 @@ each language uses its own SemVer line.
 
 ## [Unreleased]
 
+## [Rust 1.1.0] — 2026-05-23
+
+### Added
+- **`VerifyDeliveryArgs.pinned_kids: Option<&[(&str, &[u8])]>`** — accept a slice of `(kid_hex, pubkey_bytes)` tuples instead of a single `pinned_kid` + `pq_public_key`. The verifier looks up the matching pubkey by the incoming `X-KXCO-PQ-Kid` header. Closes Rust's gap behind the Phase 5 `pinnedKids[]` spec extension in `kxco-post-quantum-webhook` ≥ 0.3.0.
+- **`VerifyResult.resolved_kid: Option<String>`** — populated with the matched kid when `pinned_kids` is used and matched; `None` for single-kid mode.
+- Mutual-exclusion check: passing both `pinned_kids` and `pq_public_key`/`pinned_kid` panics. Treat as programmer-error precondition.
+- Tests: 3 new cases covering mutex enforcement, kid-mismatch handling, kid-match resolution.
+
+### Changed (minor breaking)
+- `VerifyResult` **no longer derives `Copy`** because the new `resolved_kid: Option<String>` is owned. Callers who relied on `Copy` should use `.clone()` instead. `Clone`/`PartialEq`/`Eq`/`Debug` derives remain.
+
+### Compatibility
+- Singular `pinned_kid` + `pq_public_key` form continues to work unchanged. Zero behaviour change for v1.0.0 callers that don't move `VerifyResult` by value.
+- Wire format identical to `kxco-post-quantum-webhook` ≥ 0.3.0 and to the spec in [`docs/webhook-contract.md`](https://github.com/JackKXCO/kxco-post-quantum-webhook/blob/main/docs/webhook-contract.md#key-rotation-and-history).
+- Install: `cargo add kxco-verify@1.1.0`
+
 ## [Go 1.1.0] — 2026-05-23
 
 ### Added

@@ -26,12 +26,20 @@ pub const DEFAULT_REPLAY_WINDOW: i64 = 300;
 
 /// Outcome of a delivery verification. A delivery is acceptable when
 /// `(hmac_ok || pq_ok) && timestamp_ok && kid_ok` — see [`VerifyResult::ok`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Note: `Copy` was removed in v1.1.0 because [`Self::resolved_kid`] is an
+/// owned `Option<String>`. Use `.clone()` if you need to pass the result
+/// around by value.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifyResult {
     pub hmac_ok:      bool,
     pub pq_ok:        bool,
     pub timestamp_ok: bool,
     pub kid_ok:       bool,
+    /// Populated when [`VerifyDeliveryArgs::pinned_kids`] is used and the
+    /// incoming `X-KXCO-PQ-Kid` header matched one of the pinned entries.
+    /// `None` for single-kid mode. Added in v1.1.0.
+    pub resolved_kid: Option<String>,
 }
 
 impl VerifyResult {
@@ -133,6 +141,13 @@ pub struct VerifyDeliveryArgs<'a> {
     pub hmac_secret:    Option<&'a [u8]>,
     pub pq_public_key:  Option<&'a [u8]>,
     pub pinned_kid:     Option<&'a str>,
+    /// Multi-kid acceptance set: `(kid_hex, pubkey_bytes)` pairs. When set,
+    /// the verifier looks up the incoming `X-KXCO-PQ-Kid` header in this
+    /// slice and uses the matching pubkey. Mutually exclusive with
+    /// [`Self::pq_public_key`]/[`Self::pinned_kid`] — combining them panics.
+    ///
+    /// Added in v1.1.0 for Phase 5 multi-kid rotation support.
+    pub pinned_kids:    Option<&'a [(&'a str, &'a [u8])]>,
     pub window_seconds: i64,
     pub now_unix:       i64,
 }
@@ -151,7 +166,17 @@ impl Headers for std::collections::HashMap<String, String> {
 
 /// Full delivery verifier. Either signature alone is sufficient; verifying
 /// both is defence-in-depth.
+///
+/// # Panics
+/// Panics if both [`VerifyDeliveryArgs::pinned_kids`] and
+/// [`VerifyDeliveryArgs::pq_public_key`]/[`VerifyDeliveryArgs::pinned_kid`]
+/// are supplied — those configurations are mutually exclusive. Treat as a
+/// programmer-error precondition.
 pub fn verify_delivery(args: VerifyDeliveryArgs<'_>) -> VerifyResult {
+    if args.pinned_kids.is_some() && (args.pq_public_key.is_some() || args.pinned_kid.is_some()) {
+        panic!("verify_delivery: pinned_kids is mutually exclusive with pq_public_key/pinned_kid — pick one shape");
+    }
+
     let timestamp = args.headers.get("x-kxco-timestamp").unwrap_or("");
     let sig_hmac  = args.headers.get("x-kxco-signature").unwrap_or("");
     let sig_pq    = args.headers.get("x-kxco-pq-signature").unwrap_or("");
@@ -160,16 +185,28 @@ pub fn verify_delivery(args: VerifyDeliveryArgs<'_>) -> VerifyResult {
     let ts: i64 = timestamp.parse().unwrap_or(i64::MIN);
     let window  = if args.window_seconds == 0 { DEFAULT_REPLAY_WINDOW } else { args.window_seconds };
     let timestamp_ok = ts != i64::MIN && (args.now_unix - ts).abs() <= window;
-    let kid_ok = args.pinned_kid.map_or(true, |pk| kid_equals(kid, pk));
+
+    // Resolve which pubkey (if any) to verify against this delivery.
+    let (eff_pubkey, kid_ok, resolved_kid): (Option<&[u8]>, bool, Option<String>) = if let Some(set) = args.pinned_kids {
+        // Multi-kid mode: look up by exact kid match.
+        match set.iter().find(|(k, _)| kid_equals(kid, k)) {
+            Some((matched_kid, pk)) => (Some(*pk), true, Some((*matched_kid).to_string())),
+            None                    => (None, false, None),
+        }
+    } else {
+        // Single-kid mode (pre-1.1.0 path, unchanged).
+        let ok = args.pinned_kid.map_or(true, |pk| kid_equals(kid, pk));
+        (args.pq_public_key, ok, None)
+    };
 
     let hmac_ok = match (args.hmac_secret, !sig_hmac.is_empty() && timestamp_ok) {
         (Some(secret), true) => verify_hmac(secret, timestamp, args.raw_body, sig_hmac),
         _ => false,
     };
-    let pq_ok = match (args.pq_public_key, !sig_pq.is_empty() && timestamp_ok && kid_ok) {
+    let pq_ok = match (eff_pubkey, !sig_pq.is_empty() && timestamp_ok && kid_ok) {
         (Some(pk), true) => verify_pq(pk, timestamp, args.raw_body, sig_pq),
         _ => false,
     };
 
-    VerifyResult { hmac_ok, pq_ok, timestamp_ok, kid_ok }
+    VerifyResult { hmac_ok, pq_ok, timestamp_ok, kid_ok, resolved_kid }
 }
